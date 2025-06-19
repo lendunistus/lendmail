@@ -18,31 +18,47 @@
 
 #define BUFSIZE 4096
 
-void mx_query_cb(void *host, ares_status_t status, size_t timeouts,
+struct mx_host {
+  size_t priority;
+  char *name;
+};
+
+/* The ares query callback only takes one user arg so I guess we're making a
+ * struct */
+struct found_hosts {
+  size_t hosts_len;
+  struct mx_host *hosts;
+};
+
+void mx_query_cb(void *arg, ares_status_t status, size_t timeouts,
                  const ares_dns_record_t *dnsrec) {
-  int i;
+  size_t i, mx_count;
+  // because I don't want to have to cast the pointer every time
+  struct found_hosts *found_hosts = arg;
+  // Prepare hosts array
+  ((struct found_hosts *)found_hosts)->hosts = malloc(sizeof(struct mx_host));
 
   if (dnsrec == NULL) {
     return;
   }
 
-  printf("MX hosts for %s:\n", (char *)host);
   for (i = 0; i < ares_dns_record_rr_cnt(dnsrec, ARES_SECTION_ANSWER); i++) {
     const ares_dns_rr_t *rr = NULL;
     rr = ares_dns_record_rr_get_const(dnsrec, ARES_SECTION_ANSWER, i);
     if (ares_dns_rr_get_type(rr) != ARES_REC_TYPE_MX) {
       continue;
-    }
+    };
 
-    printf("%s\n", ares_dns_rr_get_str(rr, ARES_RR_MX_EXCHANGE));
-    printf("MX Priority: %u \n",
-           ares_dns_rr_get_u16(rr, ARES_RR_MX_PREFERENCE));
+    mx_count++;
+    if (mx_count >= found_hosts->hosts_len) {
+      found_hosts = realloc(found_hosts, found_hosts->hosts_len * 2);
+    }
   };
 }
 
 int main(int argc, char **argv) {
   if (argc != 2) {
-    printf("Usage: main [domain_name]");
+    printf("Usage: main [domain_name]\n");
     return (0);
   }
 
@@ -63,8 +79,9 @@ int main(int argc, char **argv) {
     return (1);
   }
 
+  struct found_hosts found_hosts = {.hosts_len = 1, .hosts = NULL};
   status = ares_query_dnsrec(channel, argv[1], ARES_CLASS_IN, ARES_REC_TYPE_MX,
-                             mx_query_cb, argv[1], NULL);
+                             mx_query_cb, &found_hosts, NULL);
   if (status != ARES_SUCCESS) {
     printf("failed to enqueue query: %s\n", ares_strerror(status));
     return (1);
