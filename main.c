@@ -36,7 +36,7 @@ void mx_query_cb(void *arg, ares_status_t status, size_t timeouts,
   // because I don't want to have to cast the pointer every time
   struct found_hosts *found_hosts = arg;
   // Prepare hosts array
-  ((struct found_hosts *)found_hosts)->hosts = malloc(sizeof(struct mx_host));
+  found_hosts->hosts = malloc(sizeof(struct mx_host));
 
   if (dnsrec == NULL) {
     return;
@@ -50,10 +50,19 @@ void mx_query_cb(void *arg, ares_status_t status, size_t timeouts,
     };
 
     mx_count++;
+    printf("%u \n",found_hosts->hosts_len);
     if (mx_count >= found_hosts->hosts_len) {
-      found_hosts = realloc(found_hosts, found_hosts->hosts_len * 2);
-    }
+      found_hosts->hosts = realloc(found_hosts->hosts, found_hosts->hosts_len * 2 * sizeof(struct mx_host));
+      found_hosts->hosts_len *= 2 * sizeof(struct mx_host);
+    };
+    struct mx_host host = {
+	    .priority = ares_dns_record_rr_get_u16(rr, ARES_RR_MX_PREFERENCE),
+	    .name = ares_dns_record_rr_get_str(rr, ARES_RR_MX_EXCHANGE)
+	    };
+    found_hosts->hosts[mx_count - 1] = host;
   };
+  found_hosts->hosts = realloc(found_hosts->hosts, mx_count);
+  found_hosts->hosts_len = mx_count;
 }
 
 int main(int argc, char **argv) {
@@ -88,6 +97,10 @@ int main(int argc, char **argv) {
   }
 
   ares_queue_wait_empty(channel, -1);
+
+  for (int i = 0; i < found_hosts.hosts_len; i++) {
+	  printf("%s", found_hosts.hosts[i].name);
+	  };
 
   ares_destroy(channel);
   ares_library_cleanup();
