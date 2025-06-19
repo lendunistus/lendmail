@@ -30,6 +30,16 @@ struct found_hosts {
   struct mx_host *hosts;
 };
 
+int mx_host_compare(const void *a, const void *b) {
+  if (((struct mx_host *)a)->priority < ((struct mx_host *)b)->priority) {
+    return (-1);
+  } else if (((struct mx_host *)a)->priority > ((struct mx_host *)b)->priority) {
+    return (1);
+  } else {
+    return (0);
+  }
+}
+
 void mx_query_cb(void *arg, ares_status_t status, size_t timeouts,
                  const ares_dns_record_t *dnsrec) {
   size_t i, mx_count = 0;
@@ -102,6 +112,7 @@ int main(int argc, char **argv) {
   }
 
   ares_queue_wait_empty(channel, -1);
+  qsort(found_hosts.hosts, found_hosts.hosts_len, sizeof(struct mx_host), mx_host_compare);
   for (int i = 0; i < found_hosts.hosts_len; i++) {
 	  printf("%s\n", found_hosts.hosts[i].name);
 	  };
