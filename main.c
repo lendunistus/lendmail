@@ -56,8 +56,8 @@ void mx_query_cb(void *arg, ares_status_t status, size_t timeouts,
       found_hosts->hosts_len *= 2 * sizeof(struct mx_host);
     };
     struct mx_host host = {
-	    .priority = ares_dns_record_rr_get_u16(rr, ARES_RR_MX_PREFERENCE),
-	    .name = ares_dns_record_rr_get_str(rr, ARES_RR_MX_EXCHANGE)
+	    .priority = ares_dns_rr_get_u16(rr, ARES_RR_MX_PREFERENCE),
+	    .name = ares_dns_rr_get_str(rr, ARES_RR_MX_EXCHANGE)
 	    };
     found_hosts->hosts[mx_count - 1] = host;
   };
