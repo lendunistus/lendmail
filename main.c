@@ -30,6 +30,15 @@ struct found_hosts {
   struct mx_host *hosts;
 };
 
+/* are my data structes really this awful */
+void free_mx_hosts(struct found_hosts *found_hosts) {
+  // Free names
+  for (size_t i = 0; i < found_hosts->hosts_len; i++) {
+    free(found_hosts->hosts[i].name);
+  }
+  free(found_hosts->hosts);
+}
+
 int mx_host_compare(const void *a, const void *b) {
   if (((struct mx_host *)a)->priority < ((struct mx_host *)b)->priority) {
     return (-1);
@@ -116,6 +125,7 @@ int main(int argc, char **argv) {
   for (int i = 0; i < found_hosts.hosts_len; i++) {
 	  printf("%s\n", found_hosts.hosts[i].name);
 	  };
+  free_mx_hosts(&found_hosts);
   ares_destroy(channel);
   ares_library_cleanup();
   return (0);
