@@ -42,7 +42,8 @@ void free_mx_hosts(struct found_hosts *found_hosts) {
 int mx_host_compare(const void *a, const void *b) {
   if (((struct mx_host *)a)->priority < ((struct mx_host *)b)->priority) {
     return (-1);
-  } else if (((struct mx_host *)a)->priority > ((struct mx_host *)b)->priority) {
+  } else if (((struct mx_host *)a)->priority >
+             ((struct mx_host *)b)->priority) {
     return (1);
   } else {
     return (0);
@@ -69,21 +70,23 @@ void mx_query_cb(void *arg, ares_status_t status, size_t timeouts,
     };
 
     mx_count++;
-    printf("hosts_len: %u, mx_count: %i\n", found_hosts->hosts_len, mx_count);
+    printf("hosts_len: %zu, mx_count: %zu\n", found_hosts->hosts_len, mx_count);
     if (mx_count >= found_hosts->hosts_len) {
-      found_hosts->hosts = realloc(found_hosts->hosts, found_hosts->hosts_len * 2 * sizeof(struct mx_host));
+      found_hosts->hosts =
+          realloc(found_hosts->hosts,
+                  found_hosts->hosts_len * 2 * sizeof(struct mx_host));
       found_hosts->hosts_len *= 2;
     };
     struct mx_host host = {
-	    .priority = ares_dns_rr_get_u16(rr, ARES_RR_MX_PREFERENCE),
-      /* All of the RR memory is freed after exiting from the callback, so
-      we have to make a copy */
-	    .name = strdup(ares_dns_rr_get_str(rr, ARES_RR_MX_EXCHANGE))
-	    };
+        .priority = ares_dns_rr_get_u16(rr, ARES_RR_MX_PREFERENCE),
+        /* All of the RR memory is freed after exiting from the callback, so
+        we have to make a copy */
+        .name = strdup(ares_dns_rr_get_str(rr, ARES_RR_MX_EXCHANGE))};
     found_hosts->hosts[mx_count - 1] = host;
   };
   printf("for loop done\n");
-  found_hosts->hosts = realloc(found_hosts->hosts, mx_count * sizeof(struct mx_host));
+  found_hosts->hosts =
+      realloc(found_hosts->hosts, mx_count * sizeof(struct mx_host));
   printf("realloc done\n");
   found_hosts->hosts_len = mx_count;
   printf("callback finished\n");
@@ -121,10 +124,11 @@ int main(int argc, char **argv) {
   }
 
   ares_queue_wait_empty(channel, -1);
-  qsort(found_hosts.hosts, found_hosts.hosts_len, sizeof(struct mx_host), mx_host_compare);
+  qsort(found_hosts.hosts, found_hosts.hosts_len, sizeof(struct mx_host),
+        mx_host_compare);
   for (int i = 0; i < found_hosts.hosts_len; i++) {
-	  printf("%s\n", found_hosts.hosts[i].name);
-	  };
+    printf("%s\n", found_hosts.hosts[i].name);
+  };
   free_mx_hosts(&found_hosts);
   ares_destroy(channel);
   ares_library_cleanup();
