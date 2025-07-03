@@ -5,6 +5,7 @@
 #include <arpa/nameser.h>
 #include <arpa/nameser_compat.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -63,7 +64,7 @@ void initiate_connection(void *arg, int status,
     if (sockfd == -1) {
       return;
     }
-    
+
     /* We're using poll() so we can have connect() with a timeout
      * This sets up pollfd array (with one element) and attempts to connect */
     struct pollfd pfds[1];
@@ -107,6 +108,8 @@ int mx_host_compare(const void *a, const void *b) {
   }
 }
 
+/* Store hosts as an array of struct mx_hosts, with the pointer + length
+ * stored in the struct found_hosts passed as an arg */
 void mx_query_cb(void *arg, ares_status_t status, size_t timeouts,
                  const ares_dns_record_t *dnsrec) {
   size_t i, mx_count = 0;
@@ -207,12 +210,20 @@ int main(int argc, char **argv) {
   };
 
   char *buf = malloc(1024);
-  if (recv(client_options.sockfd, buf, 1024, 0) < 1) {
+  int received = recv(client_options.sockfd, buf, 1024, 0);
+  if (received < 1) {
     printf("recv: %s\n", strerror(errno));
     return (0);
   }
   printf("%s", buf);
+  // Get last two characters + terminator
+  char crlf[3] = {0};
+  strncpy(crlf, buf + received - 2, 2);
+  if (strcmp(crlf, "\r\n") == 0) {
+    printf("Ends with CRLF\n");
+  }
   free_mx_hosts(&found_hosts);
+  free(buf);
   ares_destroy(channel);
   ares_library_cleanup();
   return (0);
