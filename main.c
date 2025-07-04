@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <time.h>
 
 #define BUFSIZE 4096
 #define MX_HOSTS_DEFAULT 10
@@ -38,6 +39,67 @@ struct client_options {
   int init_connect_timeout; // Amount of time in ms to wait to connect to server
   int sockfd; // Socket we're using to connect to server
 };
+
+/* https://stackoverflow.com/a/61960339 
+ * maybe I should've made this myself. eh */
+#include <sys/socket.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <time.h>
+
+int connect_with_timeout(int sockfd, const struct sockaddr *addr, socklen_t addrlen, unsigned int timeout_ms) {
+    int rc = 0;
+    // Set O_NONBLOCK
+    int sockfd_flags_before;
+    if((sockfd_flags_before=fcntl(sockfd,F_GETFL,0)<0)) return -1;
+    if(fcntl(sockfd,F_SETFL,sockfd_flags_before | O_NONBLOCK)<0) return -1;
+    // Start connecting (asynchronously)
+    do {
+        if (connect(sockfd, addr, addrlen)<0) {
+            // Did connect return an error? If so, we'll fail.
+            if ((errno != EWOULDBLOCK) && (errno != EINPROGRESS)) {
+                rc = -1;
+            }
+            // Otherwise, we'll wait for it to complete.
+            else {
+                // Set a deadline timestamp 'timeout' ms from now (needed b/c poll can be interrupted)
+                struct timespec now;
+                if(clock_gettime(CLOCK_MONOTONIC, &now)<0) { rc=-1; break; }
+                struct timespec deadline = { .tv_sec = now.tv_sec,
+                                             .tv_nsec = now.tv_nsec + timeout_ms*1000000l};
+                // Wait for the connection to complete.
+                do {
+                    // Calculate how long until the deadline
+                    if(clock_gettime(CLOCK_MONOTONIC, &now)<0) { rc=-1; break; }
+                    int ms_until_deadline = (int)(  (deadline.tv_sec  - now.tv_sec)*1000l
+                                                  + (deadline.tv_nsec - now.tv_nsec)/1000000l);
+                    if(ms_until_deadline<0) { rc=0; break; }
+                    // Wait for connect to complete (or for the timeout deadline)
+                    struct pollfd pfds[] = { { .fd = sockfd, .events = POLLOUT } };
+                    rc = poll(pfds, 1, ms_until_deadline);
+                    // If poll 'succeeded', make sure it *really* succeeded
+                    if(rc>0) {
+                        int error = 0; socklen_t len = sizeof(error);
+                        int retval = getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &len);
+                        if(retval==0) errno = error;
+                        if(error!=0) rc=-1;
+                    }
+                }
+                // If poll was interrupted, try again.
+                while(rc==-1 && errno==EINTR);
+                // Did poll timeout? If so, fail.
+                if(rc==0) {
+                    errno = ETIMEDOUT;
+                    rc=-1;
+                }
+            }
+        }
+    } while(0);
+    // Restore original O_NONBLOCK state
+    if(fcntl(sockfd,F_SETFL,sockfd_flags_before)<0) return -1;
+    // Success
+    return rc;
+}
 
 /* Callback called by ares_getaddrinfo - get results of addrinfo call and
  * attempt to connect to host */
@@ -70,21 +132,18 @@ void initiate_connection(void *arg, int status,
     struct pollfd pfds[1];
     pfds[0].fd = sockfd; // Socket we just made
     pfds[0].events = POLLOUT; // Inform if ready to send without blocking
-  
-    if (connect(sockfd, p->ai_addr, p->ai_addrlen) < 0) {
-      printf("connect: %s\n", strerror(errno));
-      return;
-    }
-    if (poll(pfds, 1, client_options->init_connect_timeout) == 1) {
-      // If we're here, connection succeeded
+
+    int rc = connect_with_timeout(sockfd, p->ai_addr, p->ai_addrlen,
+        client_options->init_connect_timeout);
+    if (rc != 1) {
+      // If we're here, we've timed out. Clean up socket and do loop again
+      printf("Failed: %i\n", rc);
+      close(sockfd);
+    } else {
       client_options->sockfd = sockfd;
-      inet_ntop(p->ai_family, addr, ip_addr_str, INET6_ADDRSTRLEN);
-      printf("Successfully connected to %s\n", ip_addr_str);
+      printf("Socket: %i\n", client_options->sockfd);
       break;
     }
-
-    // If we're here, we've timed out. Clean up socket and do loop again
-    close(sockfd);
   }
 }
 
@@ -209,7 +268,7 @@ int main(int argc, char **argv) {
     }
   };
 
-  char *buf = malloc(1024);
+  char *buf = calloc(1024, sizeof(char));
   int received = recv(client_options.sockfd, buf, 1024, 0);
   if (received < 1) {
     printf("recv: %s\n", strerror(errno));
@@ -222,6 +281,14 @@ int main(int argc, char **argv) {
   if (strcmp(crlf, "\r\n") == 0) {
     printf("Ends with CRLF\n");
   }
+  char msg[] = "EHLO trumm.eu\r\n";
+  send(client_options.sockfd, msg, strlen(msg), 0);
+  received = recv(client_options.sockfd, buf, 1024, 0);
+  if (received < 1) {
+    printf("recv: %s\n", strerror(errno));
+    return (0);
+  }
+  printf("%s", buf);
   free_mx_hosts(&found_hosts);
   free(buf);
   ares_destroy(channel);
