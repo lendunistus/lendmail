@@ -1,115 +1,101 @@
 // Hello there!
 
 #include <ares.h>
-#include <arpa/inet.h>
-#include <arpa/nameser.h>
-#include <arpa/nameser_compat.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <poll.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <time.h>
+
+#include "main.h"
 
 #define BUFSIZE 4096
 #define MX_HOSTS_DEFAULT 10
 #define CONNECT_TIMEOUT 1500
+#define DOMAIN "trumm.eu"
 
-struct mx_host {
-  size_t priority;
-  char *name;
-};
+struct client_options client_options = {
+    .init_connect_timeout = CONNECT_TIMEOUT, .sockfd = -1, .domain = DOMAIN};
 
-/* The ares query callback only takes one user arg so I guess we're making a
- * struct */
-struct found_hosts {
-  size_t hosts_len;
-  struct mx_host *hosts;
-};
-
-// Stores misc information about client that may need to be passed to functions
-struct client_options {
-  int init_connect_timeout; // Amount of time in ms to wait to connect to server
-  int sockfd; // Socket we're using to connect to server
-};
-
-/* https://stackoverflow.com/a/61960339 
+/* https://stackoverflow.com/a/61960339
  * maybe I should've made this myself. eh */
-#include <sys/socket.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <time.h>
-
-int connect_with_timeout(int sockfd, const struct sockaddr *addr, socklen_t addrlen, unsigned int timeout_ms) {
-    int rc = 0;
-    // Set O_NONBLOCK
-    int sockfd_flags_before;
-    if((sockfd_flags_before=fcntl(sockfd,F_GETFL,0)<0)) return -1;
-    if(fcntl(sockfd,F_SETFL,sockfd_flags_before | O_NONBLOCK)<0) return -1;
-    // Start connecting (asynchronously)
-    do {
-        if (connect(sockfd, addr, addrlen)<0) {
-            // Did connect return an error? If so, we'll fail.
-            if ((errno != EWOULDBLOCK) && (errno != EINPROGRESS)) {
-                rc = -1;
-            }
-            // Otherwise, we'll wait for it to complete.
-            else {
-                // Set a deadline timestamp 'timeout' ms from now (needed b/c poll can be interrupted)
-                struct timespec now;
-                if(clock_gettime(CLOCK_MONOTONIC, &now)<0) { rc=-1; break; }
-                struct timespec deadline = { .tv_sec = now.tv_sec,
-                                             .tv_nsec = now.tv_nsec + timeout_ms*1000000l};
-                // Wait for the connection to complete.
-                do {
-                    // Calculate how long until the deadline
-                    if(clock_gettime(CLOCK_MONOTONIC, &now)<0) { rc=-1; break; }
-                    int ms_until_deadline = (int)(  (deadline.tv_sec  - now.tv_sec)*1000l
-                                                  + (deadline.tv_nsec - now.tv_nsec)/1000000l);
-                    if(ms_until_deadline<0) { rc=0; break; }
-                    // Wait for connect to complete (or for the timeout deadline)
-                    struct pollfd pfds[] = { { .fd = sockfd, .events = POLLOUT } };
-                    rc = poll(pfds, 1, ms_until_deadline);
-                    // If poll 'succeeded', make sure it *really* succeeded
-                    if(rc>0) {
-                        int error = 0; socklen_t len = sizeof(error);
-                        int retval = getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &len);
-                        if(retval==0) errno = error;
-                        if(error!=0) rc=-1;
-                    }
-                }
-                // If poll was interrupted, try again.
-                while(rc==-1 && errno==EINTR);
-                // Did poll timeout? If so, fail.
-                if(rc==0) {
-                    errno = ETIMEDOUT;
-                    rc=-1;
-                }
-            }
+int connect_with_timeout(int sockfd, const struct sockaddr *addr,
+                         socklen_t addrlen, unsigned int timeout_ms) {
+  int rc = 0;
+  // Set O_NONBLOCK
+  int sockfd_flags_before;
+  if ((sockfd_flags_before = fcntl(sockfd, F_GETFL, 0) < 0))
+    return -1;
+  if (fcntl(sockfd, F_SETFL, sockfd_flags_before | O_NONBLOCK) < 0)
+    return -1;
+  // Start connecting (asynchronously)
+  do {
+    if (connect(sockfd, addr, addrlen) < 0) {
+      // Did connect return an error? If so, we'll fail.
+      if ((errno != EWOULDBLOCK) && (errno != EINPROGRESS)) {
+        rc = -1;
+      }
+      // Otherwise, we'll wait for it to complete.
+      else {
+        // Set a deadline timestamp 'timeout' ms from now (needed b/c poll can
+        // be interrupted)
+        struct timespec now;
+        if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) {
+          rc = -1;
+          break;
         }
-    } while(0);
-    // Restore original O_NONBLOCK state
-    if(fcntl(sockfd,F_SETFL,sockfd_flags_before)<0) return -1;
-    // Success
-    return rc;
+        struct timespec deadline = {.tv_sec = now.tv_sec,
+                                    .tv_nsec =
+                                        now.tv_nsec + timeout_ms * 1000000l};
+        // Wait for the connection to complete.
+        do {
+          // Calculate how long until the deadline
+          if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) {
+            rc = -1;
+            break;
+          }
+          int ms_until_deadline =
+              (int)((deadline.tv_sec - now.tv_sec) * 1000l +
+                    (deadline.tv_nsec - now.tv_nsec) / 1000000l);
+          if (ms_until_deadline < 0) {
+            rc = 0;
+            break;
+          }
+          // Wait for connect to complete (or for the timeout deadline)
+          struct pollfd pfds[] = {{.fd = sockfd, .events = POLLOUT}};
+          rc = poll(pfds, 1, ms_until_deadline);
+          // If poll 'succeeded', make sure it *really* succeeded
+          if (rc > 0) {
+            int error = 0;
+            socklen_t len = sizeof(error);
+            int retval = getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &len);
+            if (retval == 0)
+              errno = error;
+            if (error != 0)
+              rc = -1;
+          }
+        }
+        // If poll was interrupted, try again.
+        while (rc == -1 && errno == EINTR);
+        // Did poll timeout? If so, fail.
+        if (rc == 0) {
+          errno = ETIMEDOUT;
+          rc = -1;
+        }
+      }
+    }
+  } while (0);
+  // Restore original O_NONBLOCK state
+  if (fcntl(sockfd, F_SETFL, sockfd_flags_before) < 0)
+    return -1;
+  // Success
+  return rc;
 }
 
 /* Callback called by ares_getaddrinfo - get results of addrinfo call and
  * attempt to connect to host */
-void initiate_connection(void *arg, int status, 
-                         int timeouts, struct ares_addrinfo *result) {
+void initiate_connection(void *arg, int status, int timeouts,
+                         struct ares_addrinfo *result) {
   struct client_options *client_options = (struct client_options *)arg;
   struct ares_addrinfo_node *p;
   char ip_addr_str[INET6_ADDRSTRLEN];
 
-  for(p = result->nodes; p != NULL; p = p->ai_next) {
+  for (p = result->nodes; p != NULL; p = p->ai_next) {
     // Get string representation (thanks beej)
     struct sockaddr_in *ipv4;
     struct sockaddr_in6 *ipv6;
@@ -130,11 +116,11 @@ void initiate_connection(void *arg, int status,
     /* We're using poll() so we can have connect() with a timeout
      * This sets up pollfd array (with one element) and attempts to connect */
     struct pollfd pfds[1];
-    pfds[0].fd = sockfd; // Socket we just made
+    pfds[0].fd = sockfd;      // Socket we just made
     pfds[0].events = POLLOUT; // Inform if ready to send without blocking
 
     int rc = connect_with_timeout(sockfd, p->ai_addr, p->ai_addrlen,
-        client_options->init_connect_timeout);
+                                  client_options->init_connect_timeout);
     if (rc != 1) {
       // If we're here, we've timed out. Clean up socket and do loop again
       printf("Failed: %i\n", rc);
@@ -223,11 +209,6 @@ int main(int argc, char **argv) {
   int optmask = 0;
   ares_status_t status;
 
-  struct client_options client_options;
-  memset(&client_options, 0, sizeof(struct client_options));
-  client_options.init_connect_timeout = CONNECT_TIMEOUT;
-  client_options.sockfd = -1;
-
   ares_library_init(ARES_LIB_INIT_ALL);
   memset(&options, 0, sizeof(options));
   optmask |= ARES_OPT_EVENT_THREAD;
@@ -249,7 +230,8 @@ int main(int argc, char **argv) {
   }
 
   ares_queue_wait_empty(channel, -1);
-  // Sort found hosts based on priority (hosts with lowest priority value are tried first)
+  // Sort found hosts based on priority (hosts with lowest priority value are
+  // tried first)
   qsort(found_hosts.hosts, found_hosts.hosts_len, sizeof(struct mx_host),
         mx_host_compare);
 
