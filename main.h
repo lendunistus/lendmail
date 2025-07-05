@@ -1,3 +1,5 @@
+#pragma once
+
 #include <arpa/inet.h>
 #include <arpa/nameser.h>
 #include <arpa/nameser_compat.h>
@@ -34,7 +36,9 @@ struct found_hosts {
   struct mx_host *hosts;
 };
 
-extern struct client_options client_options;
+int sendall(int, char *, size_t *);
+
+int recvall(int, char *, size_t);
 
 int connect_with_timeout(int sockfd, const struct sockaddr *addr,
                          socklen_t addrlen, unsigned int timeout_ms);

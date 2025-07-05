@@ -1,16 +1,64 @@
 // Hello there!
 
 #include <ares.h>
+#include <string.h>
 
 #include "main.h"
+#include "smtp_commands.h"
 
 #define BUFSIZE 4096
 #define MX_HOSTS_DEFAULT 10
 #define CONNECT_TIMEOUT 1500
 #define DOMAIN "trumm.eu"
 
-struct client_options client_options = {
-    .init_connect_timeout = CONNECT_TIMEOUT, .sockfd = -1, .domain = DOMAIN};
+/* Send all bytes in buffer, accounting for partial sends (thanks beej)
+ * Returns 0 on success and -1 on failure */
+int sendall(int sockfd, char *buf, size_t *buflen) {
+  size_t bytes_sent = 0;
+  size_t bytesleft = 0;
+  int n;
+
+  while (bytes_sent < *buflen) {
+    n = send(sockfd, buf + bytes_sent, bytesleft, 0);
+    if (n == -1)
+      break;
+    bytes_sent += n;
+    bytesleft -= n;
+  }
+
+  *buflen = bytes_sent;
+  return n == -1 ? -1 : 0;
+}
+
+/* Receives data into buffer until we have a full command
+ * (ends with CRLF).
+ * Returns amount of received bytes on success, 0 on failure */
+int recvall(int sockfd, char *buf, size_t buflen) {
+  size_t bytes_got = 0;
+  int n;
+  char ending[3];
+
+  // Loop until our buffer ends with CRLF (or our buffer fills)
+  while (1) {
+    n = recv(sockfd, buf + bytes_got, buflen - bytes_got, 0);
+    bytes_got += n;
+    memcpy(ending, buf + bytes_got - 3, 3);
+    // Did recv return an error?
+    if (n < 1) {
+      printf("Recv: failure");
+      return (-1);
+      // Did our buffer fill?
+    } else if (bytes_got == buflen) {
+      printf("Buffer fill");
+      return (bytes_got);
+      // Does packet end in CRLF?
+    } else if (!strcmp(ending, "\r\n")) {
+      break;
+    }
+  }
+
+  return (bytes_got);
+}
 
 /* https://stackoverflow.com/a/61960339
  * maybe I should've made this myself. eh */
@@ -113,12 +161,6 @@ void initiate_connection(void *arg, int status, int timeouts,
       return;
     }
 
-    /* We're using poll() so we can have connect() with a timeout
-     * This sets up pollfd array (with one element) and attempts to connect */
-    struct pollfd pfds[1];
-    pfds[0].fd = sockfd;      // Socket we just made
-    pfds[0].events = POLLOUT; // Inform if ready to send without blocking
-
     int rc = connect_with_timeout(sockfd, p->ai_addr, p->ai_addrlen,
                                   client_options->init_connect_timeout);
     if (rc != 1) {
@@ -220,6 +262,12 @@ int main(int argc, char **argv) {
     return (1);
   }
 
+  struct client_options client_options;
+  memset(&client_options, 0, sizeof(struct client_options));
+  client_options.sockfd = -1;
+  client_options.init_connect_timeout = CONNECT_TIMEOUT;
+  client_options.domain = DOMAIN;
+
   struct found_hosts found_hosts = {.hosts_len = MX_HOSTS_DEFAULT,
                                     .hosts = NULL};
   status = ares_query_dnsrec(channel, argv[1], ARES_CLASS_IN, ARES_REC_TYPE_MX,
@@ -263,8 +311,7 @@ int main(int argc, char **argv) {
   if (strcmp(crlf, "\r\n") == 0) {
     printf("Ends with CRLF\n");
   }
-  char msg[] = "EHLO trumm.eu\r\n";
-  send(client_options.sockfd, msg, strlen(msg), 0);
+  send_ehlo(client_options.sockfd, "trumm.eu");
   received = recv(client_options.sockfd, buf, 1024, 0);
   if (received < 1) {
     printf("recv: %s\n", strerror(errno));
