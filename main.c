@@ -14,12 +14,21 @@
 /* Send all bytes in buffer, accounting for partial sends (thanks beej)
  * Returns 0 on success and -1 on failure */
 int sendall(int sockfd, char *buf, size_t *buflen) {
+  printf("Sending all\n");
   size_t bytes_sent = 0;
-  size_t bytesleft = 0;
+  size_t bytesleft = *buflen;
   int n;
+  int first = 0;
 
   while (bytes_sent < *buflen) {
+    if (first == 0) {
+      printf("First send operation\n");
+    }
     n = send(sockfd, buf + bytes_sent, bytesleft, 0);
+    if (first == 0) {
+      printf("%d\n", n);
+      first = 1;
+    }
     if (n == -1)
       break;
     bytes_sent += n;
@@ -36,13 +45,11 @@ int sendall(int sockfd, char *buf, size_t *buflen) {
 int recvall(int sockfd, char *buf, size_t buflen) {
   size_t bytes_got = 0;
   int n;
-  char ending[3];
 
   // Loop until our buffer ends with CRLF (or our buffer fills)
   while (1) {
     n = recv(sockfd, buf + bytes_got, buflen - bytes_got, 0);
     bytes_got += n;
-    memcpy(ending, buf + bytes_got - 3, 3);
     // Did recv return an error?
     if (n < 1) {
       printf("Recv: failure");
@@ -52,7 +59,8 @@ int recvall(int sockfd, char *buf, size_t buflen) {
       printf("Buffer fill");
       return (bytes_got);
       // Does packet end in CRLF?
-    } else if (!strcmp(ending, "\r\n")) {
+    } else if (*(buf + bytes_got - 2) == '\r' &
+               *(buf + bytes_got - 1) == '\n') {
       break;
     }
   }
@@ -305,18 +313,17 @@ int main(int argc, char **argv) {
     return (0);
   }
   printf("%s", buf);
-  // Get last two characters + terminator
-  char crlf[3] = {0};
-  strncpy(crlf, buf + received - 2, 2);
-  if (strcmp(crlf, "\r\n") == 0) {
+  if ((*(buf + received - 2) == '\r') & ((*(buf + received - 1) == '\n'))) {
     printf("Ends with CRLF\n");
   }
   send_ehlo(client_options.sockfd, "trumm.eu");
+  printf("Receiving after EHLO \n");
   received = recv(client_options.sockfd, buf, 1024, 0);
   if (received < 1) {
     printf("recv: %s\n", strerror(errno));
     return (0);
   }
+  printf("recv complete");
   printf("%s", buf);
   free_mx_hosts(&found_hosts);
   free(buf);
