@@ -352,6 +352,7 @@ int main(int argc, char **argv) {
     exit(-1);
   }
   printf("TLS connection success\n");
+  send_ehlo(&client_options);
   received = recvall(&client_options, buf, 1024);
   if (received < 1) {
     printf("recv: %s\n", strerror(errno));
