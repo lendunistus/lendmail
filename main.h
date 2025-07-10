@@ -7,6 +7,8 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 #include <poll.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -21,7 +23,9 @@
 struct client_options {
   int init_connect_timeout; // Amount of time in ms to wait to connect to server
   int sockfd;               // Socket we're using to connect to server
-  char *domain;             // Server domain (to be reported in EHLO)
+  char *domain;             // Our domain (to be reported in EHLO)
+  char *server_name;        // Name of server we're connecting to
+  SSL *ssl;
 };
 
 struct mx_host {
@@ -36,9 +40,9 @@ struct found_hosts {
   struct mx_host *hosts;
 };
 
-int sendall(int, char *, size_t *);
+int sendall(struct client_options *, char *, size_t *);
 
-int recvall(int, char *, size_t);
+int recvall(struct client_options *, char *, size_t);
 
 int connect_with_timeout(int sockfd, const struct sockaddr *addr,
                          socklen_t addrlen, unsigned int timeout_ms);

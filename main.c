@@ -1,6 +1,8 @@
 // Hello there!
 
 #include <ares.h>
+#include <netinet/in.h>
+#include <openssl/ssl.h>
 #include <string.h>
 
 #include "main.h"
@@ -13,7 +15,7 @@
 
 /* Send all bytes in buffer, accounting for partial sends (thanks beej)
  * Returns 0 on success and -1 on failure */
-int sendall(int sockfd, char *buf, size_t *buflen) {
+int sendall(struct client_options *options, char *buf, size_t *buflen) {
   printf("Sending all\n");
   size_t bytes_sent = 0;
   size_t bytesleft = *buflen;
@@ -24,7 +26,11 @@ int sendall(int sockfd, char *buf, size_t *buflen) {
     if (first == 0) {
       printf("First send operation\n");
     }
-    n = send(sockfd, buf + bytes_sent, bytesleft, 0);
+    if (options->ssl) {
+      n = SSL_write(options->ssl, buf + bytes_sent, bytesleft);
+    } else {
+      n = send(options->sockfd, buf + bytes_sent, bytesleft, 0);
+    }
     if (first == 0) {
       printf("%d\n", n);
       first = 1;
@@ -42,13 +48,18 @@ int sendall(int sockfd, char *buf, size_t *buflen) {
 /* Receives data into buffer until we have a full command
  * (ends with CRLF).
  * Returns amount of received bytes on success, 0 on failure */
-int recvall(int sockfd, char *buf, size_t buflen) {
+int recvall(struct client_options *options, char *buf, size_t buflen) {
   size_t bytes_got = 0;
   int n;
 
   // Loop until our buffer ends with CRLF (or our buffer fills)
   while (1) {
-    n = recv(sockfd, buf + bytes_got, buflen - bytes_got, 0);
+    if (options->ssl) {
+      n = SSL_read(options->ssl, buf + bytes_got, buflen - bytes_got);
+    } else {
+      n = recv(options->sockfd, buf + bytes_got, buflen - bytes_got, 0);
+    }
+    printf("%s", buf);
     bytes_got += n;
     // Did recv return an error?
     if (n < 1) {
@@ -59,8 +70,8 @@ int recvall(int sockfd, char *buf, size_t buflen) {
       printf("Buffer fill");
       return (bytes_got);
       // Does packet end in CRLF?
-    } else if (*(buf + bytes_got - 2) == '\r' &
-               *(buf + bytes_got - 1) == '\n') {
+    } else if ((*(buf + bytes_got - 2) == '\r') &
+               (*(buf + bytes_got - 1) == '\n')) {
       break;
     }
   }
@@ -147,7 +158,7 @@ int connect_with_timeout(int sockfd, const struct sockaddr *addr,
  * attempt to connect to host */
 void initiate_connection(void *arg, int status, int timeouts,
                          struct ares_addrinfo *result) {
-  struct client_options *client_options = (struct client_options *)arg;
+  struct client_options *options = (struct client_options *)arg;
   struct ares_addrinfo_node *p;
   char ip_addr_str[INET6_ADDRSTRLEN];
 
@@ -170,17 +181,26 @@ void initiate_connection(void *arg, int status, int timeouts,
     }
 
     int rc = connect_with_timeout(sockfd, p->ai_addr, p->ai_addrlen,
-                                  client_options->init_connect_timeout);
+                                  options->init_connect_timeout);
     if (rc != 1) {
       // If we're here, we've timed out. Clean up socket and do loop again
       printf("Failed: %i\n", rc);
       close(sockfd);
     } else {
-      client_options->sockfd = sockfd;
-      printf("Socket: %i\n", client_options->sockfd);
+      // We're connected - set sockfd, store server name, print IP, exit
+      // function
+      options->sockfd = sockfd;
+      options->server_name = strdup(result->name);
+      inet_ntop(p->ai_family, addr, ip_addr_str, INET6_ADDRSTRLEN);
+      printf("Successfully connected to %s, %s\n", ip_addr_str,
+             options->server_name);
+      printf("Socket: %i\n", options->sockfd);
       break;
     }
   }
+
+  // Clean up
+  ares_freeaddrinfo(result);
 }
 
 /* are my data structures really this awful */
@@ -306,8 +326,8 @@ int main(int argc, char **argv) {
     }
   };
 
-  char *buf = calloc(1024, sizeof(char));
-  int received = recv(client_options.sockfd, buf, 1024, 0);
+  char *buf = calloc(BUFSIZE, sizeof(char));
+  int received = recvall(&client_options, buf, 1024);
   if (received < 1) {
     printf("recv: %s\n", strerror(errno));
     return (0);
@@ -316,15 +336,29 @@ int main(int argc, char **argv) {
   if ((*(buf + received - 2) == '\r') & ((*(buf + received - 1) == '\n'))) {
     printf("Ends with CRLF\n");
   }
-  send_ehlo(client_options.sockfd, "trumm.eu");
+  send_ehlo(&client_options);
   printf("Receiving after EHLO \n");
-  received = recv(client_options.sockfd, buf, 1024, 0);
+  received = recvall(&client_options, buf, 1024);
   if (received < 1) {
     printf("recv: %s\n", strerror(errno));
     return (0);
   }
-  printf("recv complete");
   printf("%s", buf);
+
+  memset(buf, 0, BUFSIZE);
+  printf("Starting TLS\n");
+  if (start_tls(&client_options) < 0) {
+    printf("Starting TLS failed");
+    exit(-1);
+  }
+  printf("TLS connection success\n");
+  received = recvall(&client_options, buf, 1024);
+  if (received < 1) {
+    printf("recv: %s\n", strerror(errno));
+    return (0);
+  }
+  printf("%s", buf);
+
   free_mx_hosts(&found_hosts);
   free(buf);
   ares_destroy(channel);
