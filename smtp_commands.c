@@ -6,7 +6,9 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
-int parse_response(char *response);
+void parse_ehlo_list(struct client_options *options, char *msg, size_t msglen) {}
+
+int parse_response_code(char *response);
 
 // Send SMTP EHLO command with supplied domain
 int send_ehlo(struct client_options *options) {
@@ -17,7 +19,6 @@ int send_ehlo(struct client_options *options) {
   memcpy(msg + 5 + domain_len, "\r\n", 2);
   // "EHLO " + CRLF is 7 bytes
   size_t msg_len = domain_len + 7;
-  printf("msg_len: %zu", msg_len);
   /* I spent like an hour debugging why the recv call after
    * an EHLO send was blocking. I was using the domain var
    * here instead of msg. I hate myself*/

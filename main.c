@@ -42,6 +42,7 @@ int sendall(struct client_options *options, char *buf, size_t *buflen) {
   }
 
   *buflen = bytes_sent;
+  printf("%s", buf);
   return n == -1 ? -1 : 0;
 }
 
@@ -332,7 +333,6 @@ int main(int argc, char **argv) {
     printf("recv: %s\n", strerror(errno));
     return (0);
   }
-  printf("%s", buf);
   if ((*(buf + received - 2) == '\r') & ((*(buf + received - 1) == '\n'))) {
     printf("Ends with CRLF\n");
   }
@@ -343,7 +343,6 @@ int main(int argc, char **argv) {
     printf("recv: %s\n", strerror(errno));
     return (0);
   }
-  printf("%s", buf);
 
   memset(buf, 0, BUFSIZE);
   printf("Starting TLS\n");
@@ -358,7 +357,6 @@ int main(int argc, char **argv) {
     printf("recv: %s\n", strerror(errno));
     return (0);
   }
-  printf("%s", buf);
 
   free_mx_hosts(&found_hosts);
   free(buf);
