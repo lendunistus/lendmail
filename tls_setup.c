@@ -8,20 +8,7 @@
 #include "main.h"
 #include "tls_setup.h"
 
-static SSL_CTX *create_context(void) {
-    SSL_CTX *ctx;
-
-    ctx = SSL_CTX_new(TLS_client_method());
-    if (!ctx) {
-        printf("Unable to create SSL context");
-        ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
-    }
-
-    return (ctx);
-}
-
-void configure_client_context(SSL_CTX *ctx) {
+static void configure_client_context(SSL_CTX *ctx) {
     // Abort handshake if cert verification fails
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
 
@@ -32,18 +19,32 @@ void configure_client_context(SSL_CTX *ctx) {
     };
 }
 
-void tls_setup(struct client_options *options) {
-    // Set up SSL structure
-    SSL_CTX *ssl_ctx = create_context();
-    configure_client_context(ssl_ctx);
-    options->ssl = SSL_new(ssl_ctx);
+// Create configured SSL context
+SSL_CTX *create_context(void) {
+    SSL_CTX *ctx;
 
-    if (!SSL_set_fd(options->ssl, options->sockfd)) {
+    ctx = SSL_CTX_new(TLS_client_method());
+    if (!ctx) {
+        printf("Unable to create SSL context");
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+    configure_client_context(ctx);
+
+    return (ctx);
+}
+
+// Set up SSL structure for connection with the particular server
+void tls_setup(SSL_CTX *ssl_ctx, struct envelope *envelope) {
+    // Set up SSL structure
+    envelope->ssl = SSL_new(ssl_ctx);
+
+    if (!SSL_set_fd(envelope->ssl, envelope->sockfd)) {
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }
 
-    if (!SSL_set1_host(options->ssl, options->server_name)) {
+    if (!SSL_set1_host(envelope->ssl, envelope->server_name)) {
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }

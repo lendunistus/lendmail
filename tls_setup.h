@@ -4,5 +4,6 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
-// Set up TLS structure
-void tls_setup(struct client_options *);
+SSL_CTX *create_context(void);
+
+void tls_setup(SSL_CTX *, struct envelope *);

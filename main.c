@@ -7,15 +7,26 @@
 
 #include "main.h"
 #include "smtp_commands.h"
+#include "tls_setup.h"
 
 #define BUFSIZE 4096
 #define MX_HOSTS_DEFAULT 10
 #define CONNECT_TIMEOUT 1500
 #define DOMAIN "trumm.eu"
 
-/* Send all bytes in buffer, accounting for partial sends (thanks beej)
- * Returns 0 on success and -1 on failure */
-int sendall(struct client_options *options, char *buf, size_t *buflen) {
+void parse_args(int argc, char **argv) {
+    // Loop through args (we don't need the first one)
+    for (int i = 1; i < argc; i++) {
+        if (strcmp("--to", argv[i]) == 0) {
+        }
+    }
+}
+
+void append_envelope()
+
+    /* Send all bytes in buffer, accounting for partial sends (thanks beej)
+     * Returns 0 on success and -1 on failure */
+    int sendall(struct envelope *envelope, char *buf, size_t *buflen) {
     printf("Sending all\n");
     size_t bytes_sent = 0;
     size_t bytesleft = *buflen;
@@ -26,10 +37,10 @@ int sendall(struct client_options *options, char *buf, size_t *buflen) {
         if (first == 0) {
             printf("First send operation\n");
         }
-        if (options->ssl) {
-            n = SSL_write(options->ssl, buf + bytes_sent, bytesleft);
+        if (envelope->ssl) {
+            n = SSL_write(envelope->ssl, buf + bytes_sent, bytesleft);
         } else {
-            n = send(options->sockfd, buf + bytes_sent, bytesleft, 0);
+            n = send(envelope->sockfd, buf + bytes_sent, bytesleft, 0);
         }
         if (first == 0) {
             printf("%d\n", n);
@@ -49,16 +60,16 @@ int sendall(struct client_options *options, char *buf, size_t *buflen) {
 /* Receives data into buffer until we have a full command
  * (ends with CRLF).
  * Returns amount of received bytes on success, 0 on failure */
-int recvall(struct client_options *options, char *buf, size_t buflen) {
+int recvall(struct envelope *envelope, char *buf, size_t buflen) {
     size_t bytes_got = 0;
     int n;
 
     // Loop until our buffer ends with CRLF (or our buffer fills)
     while (1) {
-        if (options->ssl) {
-            n = SSL_read(options->ssl, buf + bytes_got, buflen - bytes_got);
+        if (envelope->ssl) {
+            n = SSL_read(envelope->ssl, buf + bytes_got, buflen - bytes_got);
         } else {
-            n = recv(options->sockfd, buf + bytes_got, buflen - bytes_got, 0);
+            n = recv(envelope->sockfd, buf + bytes_got, buflen - bytes_got, 0);
         }
         printf("%s", buf);
         bytes_got += n;
@@ -161,7 +172,11 @@ int connect_with_timeout(int sockfd, const struct sockaddr *addr,
  * attempt to connect to host */
 void initiate_connection(void *arg, int status, int timeouts,
                          struct ares_addrinfo *result) {
-    struct client_options *options = (struct client_options *)arg;
+    // Silence compiler warnings
+    (void)status;
+    (void)timeouts;
+    // Pre-casting the pointer
+    struct envelope *envelope = (struct envelope *)arg;
     struct ares_addrinfo_node *p;
     char ip_addr_str[INET6_ADDRSTRLEN];
 
@@ -192,12 +207,12 @@ void initiate_connection(void *arg, int status, int timeouts,
         } else {
             // We're connected - set sockfd, store server name, print IP, exit
             // function
-            options->sockfd = sockfd;
-            options->server_name = strdup(result->name);
+            envelope->sockfd = sockfd;
+            envelope->server_name = strdup(result->name);
             inet_ntop(p->ai_family, addr, ip_addr_str, INET6_ADDRSTRLEN);
             printf("Successfully connected to %s, %s\n", ip_addr_str,
-                   options->server_name);
-            printf("Socket: %i\n", options->sockfd);
+                   envelope->server_name);
+            printf("Socket: %i\n", envelope->sockfd);
             break;
         }
     }
@@ -296,74 +311,9 @@ int main(int argc, char **argv) {
 
     struct client_options client_options;
     memset(&client_options, 0, sizeof(struct client_options));
-    client_options.sockfd = -1;
     client_options.init_connect_timeout = CONNECT_TIMEOUT;
     client_options.domain = DOMAIN;
 
-    struct found_hosts found_hosts = {.hosts_len = MX_HOSTS_DEFAULT,
-                                      .hosts = NULL};
-    status =
-        ares_query_dnsrec(channel, argv[1], ARES_CLASS_IN, ARES_REC_TYPE_MX,
-                          mx_query_cb, &found_hosts, NULL);
-    if (status != ARES_SUCCESS) {
-        printf("failed to enqueue query: %s\n", ares_strerror(status));
-        return (1);
-    }
-
-    ares_queue_wait_empty(channel, -1);
-    // Sort found hosts based on priority (hosts with lowest priority value are
-    // tried first)
-    qsort(found_hosts.hosts, found_hosts.hosts_len, sizeof(struct mx_host),
-          mx_host_compare);
-
-    struct ares_addrinfo_hints hints;
-    memset(&hints, 0, sizeof(struct ares_addrinfo_hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    for (int i = 0; i < found_hosts.hosts_len; i++) {
-        ares_getaddrinfo(channel, found_hosts.hosts[i].name, "smtp", &hints,
-                         initiate_connection, &client_options);
-        ares_queue_wait_empty(channel, -1);
-
-        // sockfd being default means we couldn't connect
-        if (client_options.sockfd != -1) {
-            break;
-        }
-    };
-
-    char *buf = calloc(BUFSIZE, sizeof(char));
-    int received = recvall(&client_options, buf, 1024);
-    if (received < 1) {
-        printf("recv: %s\n", strerror(errno));
-        return (0);
-    }
-    if ((*(buf + received - 2) == '\r') & ((*(buf + received - 1) == '\n'))) {
-        printf("Ends with CRLF\n");
-    }
-    send_ehlo(&client_options);
-    printf("Receiving after EHLO \n");
-    received = recvall(&client_options, buf, 1024);
-    if (received < 1) {
-        printf("recv: %s\n", strerror(errno));
-        return (0);
-    }
-
-    memset(buf, 0, BUFSIZE);
-    printf("Starting TLS\n");
-    if (start_tls(&client_options) < 0) {
-        printf("Starting TLS failed");
-        exit(-1);
-    }
-    printf("TLS connection success\n");
-    send_ehlo(&client_options);
-    received = recvall(&client_options, buf, 1024);
-    if (received < 1) {
-        printf("recv: %s\n", strerror(errno));
-        return (0);
-    }
-
-    free_mx_hosts(&found_hosts);
-    free(buf);
     ares_destroy(channel);
     ares_library_cleanup();
     return (0);
