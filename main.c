@@ -1,6 +1,7 @@
 // Hello there!
 
 #include <ares.h>
+#include <iso646.h>
 #include <netinet/in.h>
 #include <openssl/ssl.h>
 #include <string.h>
@@ -14,19 +15,43 @@
 #define CONNECT_TIMEOUT 1500
 #define DOMAIN "trumm.eu"
 
-void parse_args(int argc, char **argv) {
+void append_envelope(char *recipient, struct client_options *options) {}
+
+void parse_args(int argc, char **argv, struct client_options *options) {
     // Loop through args (we don't need the first one)
     for (int i = 1; i < argc; i++) {
+        // Recipient addresses
         if (strcmp("--to", argv[i]) == 0) {
+            // Set i to after --to, see if there is an operand there
+            if (++i >= argc) {
+                fprintf(stderr, "%s: no operand after \"--to\"", argv[0]);
+                exit(1);
+            }
+            // Addresses are expected to be comma-separated
+            char *address = strtok(argv[i], ",");
+            // Loop through our tokenized string and add an envelope for each
+            while (address != NULL) {
+                append_envelope(address, options);
+                address = strtok(NULL, ",");
+            }
+        } else {
+            // Do we already have a message that we're sending?
+            if (options->message) {
+                fprintf(stderr, "%s: too many operands", argv[0]);
+                exit(1);
+            }
+            options->message = fopen(argv[i], "r");
+            if (options->message == NULL) {
+                fprintf(stderr, "%s: could not open file", argv[0]);
+                exit(1);
+            }
         }
     }
 }
 
-void append_envelope()
-
-    /* Send all bytes in buffer, accounting for partial sends (thanks beej)
-     * Returns 0 on success and -1 on failure */
-    int sendall(struct envelope *envelope, char *buf, size_t *buflen) {
+/* Send all bytes in buffer, accounting for partial sends (thanks beej)
+ * Returns 0 on success and -1 on failure */
+int sendall(struct envelope *envelope, char *buf, size_t *buflen) {
     printf("Sending all\n");
     size_t bytes_sent = 0;
     size_t bytesleft = *buflen;
@@ -195,6 +220,7 @@ void initiate_connection(void *arg, int status, int timeouts,
         // Get new socket (error checked)
         int sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
         if (sockfd == -1) {
+            ares_freeaddrinfo(result);
             return;
         }
 
@@ -247,7 +273,7 @@ void mx_query_cb(void *arg, ares_status_t status, size_t timeouts,
                  const ares_dns_record_t *dnsrec) {
     size_t i, mx_count = 0;
     // because I don't want to have to cast the pointer every time
-    struct found_hosts *found_hosts = arg;
+    struct found_hosts *found_hosts = (struct found_hosts *)arg;
     // Prepare hosts array
     found_hosts->hosts = malloc(sizeof(struct mx_host) * MX_HOSTS_DEFAULT);
 
@@ -287,23 +313,24 @@ void mx_query_cb(void *arg, ares_status_t status, size_t timeouts,
 }
 
 int main(int argc, char **argv) {
-    if (argc != 2) {
-        printf("Usage: %s [domain_name]\n", argv[0]);
+    if (argc < 2) {
+        printf("Usage: %s [--to (comma-separated addresses)] [filename]\n",
+               argv[0]);
         return (0);
     }
 
     printf("Hello world! \n");
     ares_channel_t *channel = NULL;
-    struct ares_options options;
+    struct ares_options ares_options;
     int optmask = 0;
     ares_status_t status;
 
     ares_library_init(ARES_LIB_INIT_ALL);
-    memset(&options, 0, sizeof(options));
+    memset(&ares_options, 0, sizeof(ares_options));
     optmask |= ARES_OPT_EVENT_THREAD;
-    options.evsys = ARES_EVSYS_DEFAULT;
+    ares_options.evsys = ARES_EVSYS_DEFAULT;
 
-    status = ares_init_options(&channel, &options, optmask);
+    status = ares_init_options(&channel, &ares_options, optmask);
     if (status != ARES_SUCCESS) {
         printf("c-ares init failed: %s \n", ares_strerror(status));
         return (1);

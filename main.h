@@ -37,6 +37,7 @@ struct client_options {
     SSL_CTX *ssl_ctx;
     struct envelope *envelopes; // Servers we're sending our email to
     size_t envelopes_no;
+    FILE *message;
 };
 
 struct mx_host {
