@@ -201,7 +201,7 @@ void initiate_connection(void *arg, int status, int timeouts,
     (void)status;
     (void)timeouts;
     // Pre-casting the pointer
-    struct envelope *envelope = (struct envelope *)arg;
+    struct envelope *envelope = arg;
     struct ares_addrinfo_node *p;
     char ip_addr_str[INET6_ADDRSTRLEN];
 
@@ -225,7 +225,7 @@ void initiate_connection(void *arg, int status, int timeouts,
         }
 
         int rc = connect_with_timeout(sockfd, p->ai_addr, p->ai_addrlen,
-                                      options->init_connect_timeout);
+                                      envelope->timeout);
         if (rc != 1) {
             // If we're here, we've timed out. Clean up socket and do loop again
             printf("Failed: %i\n", rc);
@@ -273,7 +273,7 @@ void mx_query_cb(void *arg, ares_status_t status, size_t timeouts,
                  const ares_dns_record_t *dnsrec) {
     size_t i, mx_count = 0;
     // because I don't want to have to cast the pointer every time
-    struct found_hosts *found_hosts = (struct found_hosts *)arg;
+    struct found_hosts *found_hosts = arg;
     // Prepare hosts array
     found_hosts->hosts = malloc(sizeof(struct mx_host) * MX_HOSTS_DEFAULT);
 
@@ -338,7 +338,6 @@ int main(int argc, char **argv) {
 
     struct client_options client_options;
     memset(&client_options, 0, sizeof(struct client_options));
-    client_options.init_connect_timeout = CONNECT_TIMEOUT;
     client_options.domain = DOMAIN;
 
     ares_destroy(channel);

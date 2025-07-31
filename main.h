@@ -22,18 +22,18 @@
 /* Stores information about server that is currently being connected to. One
  * envelope is made per server */
 struct envelope {
-    int sockfd;        // Socket used to connect to server
-    char *server_name; // Name of server
-    char **recipients; // Recipient email addresses
+    int sockfd;           // Socket used to connect to server
+    unsigned int timeout; // Timeout in ms
+    char *server_name;    // Name of server
+    char **recipients;    // Recipient email addresses
     size_t recipients_no;
     SSL *ssl;
 };
 
 // Stores misc information about client that may need to be passed to functions
 struct client_options {
-    int init_connect_timeout; // Amount of time in ms to wait to connect to
-                              // server
-    char *domain;             // Our domain (to be reported in EHLO)
+    int timeout;  // Timeout in ms
+    char *domain; // Our domain (to be reported in EHLO)
     SSL_CTX *ssl_ctx;
     struct envelope *envelopes; // Servers we're sending our email to
     size_t envelopes_no;
