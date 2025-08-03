@@ -3,4 +3,6 @@
 #include "main.h"
 
 // Start TLS communications
-int start_tls(struct client_options *, struct envelope *);
+int start_tls(const struct client_options *, struct envelope *);
+
+int ehlo(const struct client_options *, struct envelope *);

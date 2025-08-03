@@ -19,15 +19,27 @@
 #include <time.h>
 #include <unistd.h>
 
+// Holds address and BCC status of recipient
+struct recipient {
+    char *address; // Null terminated string in format "user@domain"
+    unsigned char bcc : 1;
+};
+
 /* Stores information about server that is currently being connected to. One
  * envelope is made per server */
 struct envelope {
+    char *buf; // Buffer used to store server responses
+    size_t buflen;
     int sockfd;           // Socket used to connect to server
     unsigned int timeout; // Timeout in ms
     char *server_name;    // Name of server
-    char **recipients;    // Recipient email addresses
+    struct recipient *recipients;
     size_t recipients_no;
     SSL *ssl;
+    // A series of flags that are set via output from EHLO
+    unsigned char tls_possible : 1;
+    unsigned char pipelining : 1;
+    unsigned long max_size;
 };
 
 // Stores misc information about client that may need to be passed to functions

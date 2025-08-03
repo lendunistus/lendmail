@@ -6,7 +6,26 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
-void parse_ehlo_list(struct client_options *options, char *msg, size_t msglen) {
+// Parse opening EHLO message and store things in provided envelope
+static void parse_ehlo_list(struct envelope *envelope, char *msg,
+                            size_t msglen) {
+    // First line of EHLO is a welcome message, skipping over it
+    char *i = strstr(msg + 4, "250");
+
+    for (char *i; i != NULL; i = strstr(msg, "250")) {
+        // Skip over response code and separator
+        i += 4;
+        if (strncmp(msg, "PIPELINING", 10) == 0) {
+            envelope->pipelining = 1;
+        } else if (strncmp(msg, "STARTTLS", 8) == 0) {
+            envelope->tls_possible = 1;
+        } else if (strncmp(msg, "SIZE", 4) == 0) {
+            // Get to SIZE argument
+            i += 5;
+            envelope->max_size = strtol(i, NULL, 10);
+        }
+        // EHLO values that we don't know about are ignored
+    }
 }
 
 int parse_response_code(char *response);
@@ -44,11 +63,14 @@ static int recv_ehlo(struct envelope *envelope, char **buf, size_t *bufsize) {
         }
     }
 
-    char *final_buf = realloc(*buf, bytes_got);
+    // Size of message + null terminator
+    char *final_buf = realloc(*buf, bytes_got + 1);
     if (!final_buf) {
         printf("recv_ehlo: final alloc fail");
         exit(-1);
     }
+    // We need the null terminator for parsing later
+    final_buf[bytes_got] = '\0';
     *buf = final_buf;
     *bufsize = bytes_got;
     return 0;
@@ -78,7 +100,7 @@ static int send_ehlo(struct envelope *envelope, char *domain) {
     return 0;
 }
 
-int start_tls(struct client_options *options, struct envelope *envelope) {
+int start_tls(const struct client_options *options, struct envelope *envelope) {
     char msg[] = "STARTTLS\r\n";
     size_t msg_len = sizeof msg - 1;
     if (sendall(envelope, msg, &msg_len) != 0) {
@@ -105,15 +127,13 @@ int start_tls(struct client_options *options, struct envelope *envelope) {
     return 0;
 }
 
-int ehlo(struct client_options *options, struct envelope *envelope) {
+int ehlo(const struct client_options *options, struct envelope *envelope) {
     if (send_ehlo(envelope, options->domain) != 0) {
         printf("EHLO failed");
         return -1;
     }
-    size_t bufsize = 1024;
-    char *buf = malloc(1024);
-    recv_ehlo(envelope, &buf, &bufsize);
+    recv_ehlo(envelope, &envelope->buf, &envelope->buflen);
+    parse_ehlo_list(envelope, envelope->buf, envelope->buflen);
 
-    free(buf);
     return 0;
 }

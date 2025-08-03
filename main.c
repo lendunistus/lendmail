@@ -1,10 +1,13 @@
 // Hello there!
 
 #include <ares.h>
+#include <ares_dns_record.h>
+#include <ctype.h>
 #include <iso646.h>
 #include <netinet/in.h>
 #include <openssl/ssl.h>
 #include <string.h>
+#include <sys/socket.h>
 
 #include "main.h"
 #include "smtp_commands.h"
@@ -15,7 +18,71 @@
 #define CONNECT_TIMEOUT 1500
 #define DOMAIN "trumm.eu"
 
-void append_envelope(char *recipient, struct client_options *options) {}
+// Add new recipient to a recipients array.
+static void add_new_recipient(struct envelope *envelope, char *address) {
+    size_t last_index = envelope->recipients_no;
+    envelope->recipients_no++;
+    struct recipient *new_ptr =
+        realloc(envelope->recipients,
+                envelope->recipients_no * sizeof(struct recipient));
+    if (new_ptr == NULL) {
+        printf("realloc failed: append_envelope");
+        exit(1);
+    }
+    envelope->recipients[last_index].address = address;
+    // TODO: Check user part of address for validity
+}
+
+// Take address and append an envelope to array in options (or add recipient to
+// existing envelope). Parameter address is a null-terminated string in format
+// "user@domain"
+static void append_envelope(char *address, struct client_options *options) {
+    // The part after the rightmost @ in the address is the server name
+    char *server_name_ptr = NULL;
+    char *p = strstr(address, "@");
+    while (p != NULL) {
+        server_name_ptr = p;
+        p = strstr(p, "@");
+    }
+    if (server_name_ptr == NULL) {
+        printf("Invalid address: %s", address);
+        exit(1);
+    }
+    // Now finding the end of the domain (any character that isn't alphanumeric,
+    // '.' or '-')
+    for (p = server_name_ptr; *p != '\0'; p++) {
+        if (!isalnum(*p) | (*p != '-') | (*p != '.')) {
+            break;
+        }
+    }
+    int name_len = p - server_name_ptr;
+    // Check if server is present in existing envelope - if so, add it there
+    for (int i = 0; i < options->envelopes_no; i++) {
+        struct envelope *envelope = &options->envelopes[i];
+        if (strcmp(server_name_ptr, envelope->server_name) == 0) {
+            add_new_recipient(envelope, address);
+            return;
+        }
+    }
+    // If we're here, there was no matching envelope - make a new one
+    size_t last_index = options->envelopes_no;
+    options->envelopes_no++;
+    struct envelope *new_ptr = realloc(
+        options->envelopes, sizeof(struct envelope) * options->envelopes_no);
+    if (new_ptr == NULL) {
+        printf("append_envelope: realloc failed");
+        exit(1);
+    }
+    // I hate this
+    options->envelopes = new_ptr;
+    memset(&options->envelopes[last_index], 0, sizeof(struct envelope));
+    options->envelopes[last_index].recipients =
+        malloc(sizeof(struct recipient));
+    options->envelopes[last_index].recipients_no = 1;
+    options->envelopes[last_index].recipients[0].address = address;
+    options->envelopes[last_index].recipients[0].bcc = 0;
+    options->envelopes[last_index].server_name = server_name_ptr;
+}
 
 void parse_args(int argc, char **argv, struct client_options *options) {
     // Loop through args (we don't need the first one)
@@ -336,9 +403,36 @@ int main(int argc, char **argv) {
         return (1);
     }
 
-    struct client_options client_options;
-    memset(&client_options, 0, sizeof(struct client_options));
-    client_options.domain = DOMAIN;
+    struct client_options options;
+    memset(&options, 0, sizeof(struct client_options));
+    options.domain = DOMAIN;
+
+    for (size_t i = 0; i < options.envelopes_no; i++) {
+        struct envelope *envelope = options.envelopes + i;
+
+        struct found_hosts found_hosts;
+        ares_query_dnsrec(channel, envelope->server_name, ARES_CLASS_IN,
+                          ARES_REC_TYPE_MX, mx_query_cb, &found_hosts, NULL);
+        ares_queue_wait_empty(channel, 1500);
+        qsort(found_hosts.hosts, found_hosts.hosts_len, sizeof(struct mx_host),
+              mx_host_compare);
+
+        struct ares_addrinfo_hints hints = {.ai_family = AF_UNSPEC,
+                                            .ai_socktype = SOCK_STREAM,
+                                            .ai_protocol = 0,
+                                            .ai_flags = 0};
+        for (size_t host = 0; host < found_hosts.hosts_len; host++) {
+            ares_getaddrinfo(channel, found_hosts.hosts[host].name, "smtp",
+                             &hints, initiate_connection, envelope);
+            ares_queue_wait_empty(channel, 1500);
+
+            if (envelope->sockfd != -1) {
+                free_mx_hosts(&found_hosts);
+                break;
+            }
+        }
+        ehlo(&options, envelope);
+    }
 
     ares_destroy(channel);
     ares_library_cleanup();
