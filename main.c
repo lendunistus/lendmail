@@ -11,6 +11,7 @@
 
 #include "main.h"
 #include "smtp_commands.h"
+#include "string_parsing.h"
 #include "tls_setup.h"
 
 #define BUFSIZE 4096
@@ -30,36 +31,39 @@ static void add_new_recipient(struct envelope *envelope, char *address) {
         exit(1);
     }
     envelope->recipients[last_index].address = address;
+    envelope->recipients = new_ptr;
     // TODO: Check user part of address for validity
+}
+
+static struct envelope create_envelope(char *recipient, char *server_name,
+                                       unsigned int timeout) {
+    struct envelope result;
+    memset(&result, 0, sizeof(struct envelope));
+
+    result.sockfd = -1;
+    result.server_name = server_name;
+    result.timeout = timeout;
+    // Set up response buffer
+    result.buflen = 1024;
+    result.buf = malloc(result.buflen);
+    // Set up first recipient
+    result.recipients_no = 1;
+    result.recipients = malloc(sizeof(struct recipient));
+    memset(result.recipients, 0, sizeof(struct recipient));
+    result.recipients[0].address = recipient;
+
+    return result;
 }
 
 // Take address and append an envelope to array in options (or add recipient to
 // existing envelope). Parameter address is a null-terminated string in format
 // "user@domain"
 static void append_envelope(char *address, struct client_options *options) {
-    // The part after the rightmost @ in the address is the server name
-    char *server_name_ptr = NULL;
-    char *p = strstr(address, "@");
-    while (p != NULL) {
-        server_name_ptr = p;
-        p = strstr(p, "@");
-    }
-    if (server_name_ptr == NULL) {
-        printf("Invalid address: %s", address);
-        exit(1);
-    }
-    // Now finding the end of the domain (any character that isn't alphanumeric,
-    // '.' or '-')
-    for (p = server_name_ptr; *p != '\0'; p++) {
-        if (!isalnum(*p) | (*p != '-') | (*p != '.')) {
-            break;
-        }
-    }
-    int name_len = p - server_name_ptr;
+    char *server_name = get_server_name(address);
     // Check if server is present in existing envelope - if so, add it there
     for (int i = 0; i < options->envelopes_no; i++) {
         struct envelope *envelope = &options->envelopes[i];
-        if (strcmp(server_name_ptr, envelope->server_name) == 0) {
+        if (strcmp(server_name, envelope->server_name) == 0) {
             add_new_recipient(envelope, address);
             return;
         }
@@ -73,15 +77,9 @@ static void append_envelope(char *address, struct client_options *options) {
         printf("append_envelope: realloc failed");
         exit(1);
     }
-    // I hate this
     options->envelopes = new_ptr;
-    memset(&options->envelopes[last_index], 0, sizeof(struct envelope));
-    options->envelopes[last_index].recipients =
-        malloc(sizeof(struct recipient));
-    options->envelopes[last_index].recipients_no = 1;
-    options->envelopes[last_index].recipients[0].address = address;
-    options->envelopes[last_index].recipients[0].bcc = 0;
-    options->envelopes[last_index].server_name = server_name_ptr;
+    options->envelopes[last_index] =
+        create_envelope(address, server_name, options->timeout);
 }
 
 void parse_args(int argc, char **argv, struct client_options *options) {
@@ -387,6 +385,7 @@ int main(int argc, char **argv) {
     }
 
     printf("Hello world! \n");
+
     ares_channel_t *channel = NULL;
     struct ares_options ares_options;
     int optmask = 0;
@@ -406,11 +405,13 @@ int main(int argc, char **argv) {
     struct client_options options;
     memset(&options, 0, sizeof(struct client_options));
     options.domain = DOMAIN;
+    parse_args(argc, argv, &options);
 
     for (size_t i = 0; i < options.envelopes_no; i++) {
         struct envelope *envelope = options.envelopes + i;
 
-        struct found_hosts found_hosts;
+        struct found_hosts found_hosts = {0};
+        found_hosts.hosts_len = MX_HOSTS_DEFAULT;
         ares_query_dnsrec(channel, envelope->server_name, ARES_CLASS_IN,
                           ARES_REC_TYPE_MX, mx_query_cb, &found_hosts, NULL);
         ares_queue_wait_empty(channel, 1500);

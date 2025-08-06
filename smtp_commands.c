@@ -12,7 +12,7 @@ static void parse_ehlo_list(struct envelope *envelope, char *msg,
     // First line of EHLO is a welcome message, skipping over it
     char *i = strstr(msg + 4, "250");
 
-    for (char *i; i != NULL; i = strstr(msg, "250")) {
+    for (i; i != NULL; i = strstr(msg, "250")) {
         // Skip over response code and separator
         i += 4;
         if (strncmp(msg, "PIPELINING", 10) == 0) {
@@ -44,7 +44,7 @@ static int recv_ehlo(struct envelope *envelope, char **buf, size_t *bufsize) {
             char *new_buf = realloc(*buf, *bufsize * 2);
             // Did our alloc fail?
             if (!new_buf) {
-                printf("recv_ehlo: alloc fail");
+                printf("recv_ehlo: alloc fail\n");
                 exit(-1);
             }
             *bufsize *= 2;
@@ -53,7 +53,7 @@ static int recv_ehlo(struct envelope *envelope, char **buf, size_t *bufsize) {
         }
         /* Go through response until we find either \n (we're at the last line)
          * or '-'' (we're not at the last line) */
-        for (size_t i = bytes_got - 1; i >= 0; i--) {
+        for (size_t i = bytes_got - 1; i != 0; i--) {
             if (*buf[i] == '-') {
                 break;
             } else if (*buf[i] == '\n') {
@@ -66,7 +66,7 @@ static int recv_ehlo(struct envelope *envelope, char **buf, size_t *bufsize) {
     // Size of message + null terminator
     char *final_buf = realloc(*buf, bytes_got + 1);
     if (!final_buf) {
-        printf("recv_ehlo: final alloc fail");
+        printf("recv_ehlo: final alloc fail\n");
         exit(-1);
     }
     // We need the null terminator for parsing later
@@ -89,7 +89,7 @@ static int send_ehlo(struct envelope *envelope, char *domain) {
      * an EHLO send was blocking. I was using the domain var
      * here instead of msg. I hate myself*/
     if (sendall(envelope, msg, &msg_len) != 0) {
-        printf("Send failed: sent %zu bytes", msg_len);
+        printf("Send failed: sent %zu bytes\n", msg_len);
         exit(-1);
     }
     if ((*(msg + msg_len - 2) == '\r') & (*(msg + msg_len - 1) == '\n')) {
@@ -104,7 +104,7 @@ int start_tls(const struct client_options *options, struct envelope *envelope) {
     char msg[] = "STARTTLS\r\n";
     size_t msg_len = sizeof msg - 1;
     if (sendall(envelope, msg, &msg_len) != 0) {
-        printf("Send failed: sent %zu bytes", msg_len);
+        printf("Send failed: sent %zu bytes\n", msg_len);
         exit(-1);
     }
 
@@ -114,7 +114,7 @@ int start_tls(const struct client_options *options, struct envelope *envelope) {
     char response_code[4] = {0};
     memcpy(response_code, buf, 3);
     if (strcmp(response_code, "220")) {
-        printf("Wrong response code: %s", response_code);
+        printf("Wrong response code: %s\n", response_code);
         return -1;
     }
 
