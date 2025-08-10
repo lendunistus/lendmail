@@ -100,6 +100,52 @@ static int send_ehlo(struct envelope *envelope, char *domain) {
     return 0;
 }
 
+// Add "MAIL FROM:<sender address>\r\n" to provided buffer. Returns number
+// of bytes added to buffer
+static size_t append_mail_from(const struct client_options *options, char **buf,
+                               size_t *buflen) {
+    // "MAIL FROM:<" and ">\r\n" is 14 chars
+    size_t msglen = strlen(options->sender) + 14;
+    if (*buflen < msglen) {
+        char *new_ptr = realloc(buf, msglen);
+        if (new_ptr == NULL) {
+            printf("generate_mail_from: alloc failed");
+            exit(1);
+        }
+        *buflen = msglen;
+        *buf = new_ptr;
+    }
+
+    memcpy(*buf, "MAIL FROM:<", 11);
+    memcpy(*buf + 11, options->sender, msglen - 14);
+    memcpy(*buf + msglen - 3, ">\r\n", 3);
+
+    return msglen;
+}
+
+// Append "RCPT TO:<recipient address>\r\n" to buffer at provided index,
+// resizing buffer if needed. Returns number of bytes added to buffer
+static size_t append_rcpt_to(const struct client_options *options, char **buf,
+                             size_t *buflen, size_t append_idx,
+                             struct recipient *recipient) {
+    size_t msglen = 12 + strlen(recipient->address);
+    if (*buflen < msglen + append_idx) {
+        char *new_ptr = realloc(buf, msglen + append_idx);
+        if (new_ptr == NULL) {
+            printf("generate_mail_from: alloc failed");
+            exit(1);
+        }
+        *buflen = msglen;
+        *buf = new_ptr;
+    }
+
+    memcpy(*buf + append_idx, "RCPT TO:<", 9);
+    memcpy(*buf + append_idx + 9, recipient->address, msglen - 12);
+    memcpy(*buf + append_idx + msglen - 3, ">\r\n", 3);
+
+    return msglen;
+}
+
 int start_tls(const struct client_options *options, struct envelope *envelope) {
     char msg[] = "STARTTLS\r\n";
     size_t msg_len = sizeof msg - 1;
@@ -127,13 +173,47 @@ int start_tls(const struct client_options *options, struct envelope *envelope) {
     return 0;
 }
 
+// Send EHLO command and parse response to find supported extensions
 int ehlo(const struct client_options *options, struct envelope *envelope) {
     if (send_ehlo(envelope, options->domain) != 0) {
-        printf("EHLO failed");
+        printf("EHLO failed\n");
         return -1;
     }
     recv_ehlo(envelope, &envelope->buf, &envelope->buflen);
     parse_ehlo_list(envelope, envelope->buf, envelope->buflen);
 
     return 0;
+}
+
+// Send "MAIL TO" and "RCPT TO" commands to server in one go. To be used if
+// server reports pipelining support (RFC 2920) in EHLO
+int send_mail_and_rcpt(const struct client_options *options,
+                       struct envelope *envelope) {
+    size_t msglen = 0;
+
+    msglen += append_mail_from(options, &envelope->buf, &envelope->buflen);
+    // One RCPT TO command per recipient
+    for (size_t i = 0; i < envelope->recipients_no; i++) {
+        msglen += append_rcpt_to(options, &envelope->buf, &envelope->buflen,
+                                 msglen, &envelope->recipients[i]);
+    }
+
+    if (sendall(envelope, envelope->buf, &msglen) < 0) {
+        printf("send_mail_and_rcpt: send failed");
+        exit(1);
+    }
+
+    // Receive response(s)
+    size_t response_len = recvall(envelope, envelope->buf, envelope->buflen);
+    // TODO: Look at response codes
+
+    return 0;
+}
+
+int send_data(const struct client_options *options, struct envelope *envelope) {
+    size_t msglen = 6;
+    if (sendall(envelope, "DATA\r\n", &msglen) < 0) {
+        printf("send_data: send failed");
+        exit(1);
+    }
 }

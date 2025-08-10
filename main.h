@@ -28,7 +28,7 @@ struct recipient {
 /* Stores information about server that is currently being connected to. One
  * envelope is made per server */
 struct envelope {
-    char *buf; // Buffer used to store server responses
+    char *buf; // Buffer used for incoming & outgoing comms with server
     size_t buflen;
     int sockfd;           // Socket used to connect to server
     unsigned int timeout; // Timeout in ms
@@ -46,6 +46,7 @@ struct envelope {
 struct client_options {
     int timeout;  // Timeout in ms
     char *domain; // Our domain (to be reported in EHLO)
+    char *sender; // Sender address as a string
     SSL_CTX *ssl_ctx;
     struct envelope *envelopes; // Servers we're sending our email to
     size_t envelopes_no;

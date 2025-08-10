@@ -82,7 +82,7 @@ static void append_envelope(char *address, struct client_options *options) {
         create_envelope(address, server_name, options->timeout);
 }
 
-void parse_args(int argc, char **argv, struct client_options *options) {
+static void parse_args(int argc, char **argv, struct client_options *options) {
     // Loop through args (we don't need the first one)
     for (int i = 1; i < argc; i++) {
         // Recipient addresses
@@ -99,6 +99,12 @@ void parse_args(int argc, char **argv, struct client_options *options) {
                 append_envelope(address, options);
                 address = strtok(NULL, ",");
             }
+        } else if (strcmp("--from", argv[i]) == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "%s: no operand after \"--to\"", argv[0]);
+                exit(1);
+            }
+            options->sender = argv[i];
         } else {
             // Do we already have a message that we're sending?
             if (options->message) {
@@ -178,7 +184,7 @@ int recvall(struct envelope *envelope, char *buf, size_t buflen) {
         }
     }
 
-    return (bytes_got);
+    return bytes_got;
 }
 
 /* https://stackoverflow.com/a/61960339
@@ -433,6 +439,13 @@ int main(int argc, char **argv) {
             }
         }
         ehlo(&options, envelope);
+        if (envelope->tls_possible) {
+            start_tls(&options, envelope);
+            ehlo(&options, envelope);
+        }
+        if (envelope->pipelining) {
+            send_mail_and_rcpt(&options, envelope);
+        }
     }
 
     ares_destroy(channel);
