@@ -45,7 +45,7 @@ static struct envelope create_envelope(char *recipient, char *server_name,
     result.timeout = timeout;
     // Set up response buffer
     result.buflen = 1024;
-    result.buf = malloc(result.buflen);
+    result.buf = calloc(result.buflen, 1);
     // Set up first recipient
     result.recipients_no = 1;
     result.recipients = malloc(sizeof(struct recipient));
@@ -306,6 +306,7 @@ void initiate_connection(void *arg, int status, int timeouts,
             // function
             envelope->sockfd = sockfd;
             envelope->server_name = strdup(result->name);
+            recvall(envelope, envelope->buf, envelope->buflen);
             inet_ntop(p->ai_family, addr, ip_addr_str, INET6_ADDRSTRLEN);
             printf("Successfully connected to %s, %s\n", ip_addr_str,
                    envelope->server_name);
@@ -411,6 +412,8 @@ int main(int argc, char **argv) {
     struct client_options options;
     memset(&options, 0, sizeof(struct client_options));
     options.domain = DOMAIN;
+    options.timeout = CONNECT_TIMEOUT;
+    options.ssl_ctx = create_context();
     parse_args(argc, argv, &options);
 
     for (size_t i = 0; i < options.envelopes_no; i++) {

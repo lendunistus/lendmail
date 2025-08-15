@@ -10,16 +10,14 @@
 static void parse_ehlo_list(struct envelope *envelope, char *msg,
                             size_t msglen) {
     // First line of EHLO is a welcome message, skipping over it
-    char *i = strstr(msg + 4, "250");
-
-    for (i; i != NULL; i = strstr(msg, "250")) {
+    for (char *i = strstr(msg + 4, "250"); i != NULL; i = strstr(i, "250")) {
         // Skip over response code and separator
         i += 4;
-        if (strncmp(msg, "PIPELINING", 10) == 0) {
+        if (strncmp(i, "PIPELINING", 10) == 0) {
             envelope->pipelining = 1;
-        } else if (strncmp(msg, "STARTTLS", 8) == 0) {
+        } else if (strncmp(i, "STARTTLS", 8) == 0) {
             envelope->tls_possible = 1;
-        } else if (strncmp(msg, "SIZE", 4) == 0) {
+        } else if (strncmp(i, "SIZE", 4) == 0) {
             // Get to SIZE argument
             i += 5;
             envelope->max_size = strtol(i, NULL, 10);
@@ -54,9 +52,9 @@ static int recv_ehlo(struct envelope *envelope, char **buf, size_t *bufsize) {
         /* Go through response until we find either \n (we're at the last line)
          * or '-'' (we're not at the last line) */
         for (size_t i = bytes_got - 1; i != 0; i--) {
-            if (*buf[i] == '-') {
+            if (*(*buf + i) == '-') {
                 break;
-            } else if (*buf[i] == '\n') {
+            } else if (*(*buf + i) == '\n') {
                 last_line = 1;
                 break;
             }
