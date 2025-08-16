@@ -416,6 +416,8 @@ int main(int argc, char **argv) {
     options.ssl_ctx = create_context();
     parse_args(argc, argv, &options);
 
+    options.message = freopen(NULL, "rb", options.message);
+
     for (size_t i = 0; i < options.envelopes_no; i++) {
         struct envelope *envelope = options.envelopes + i;
 
@@ -449,6 +451,7 @@ int main(int argc, char **argv) {
         if (envelope->pipelining) {
             send_mail_and_rcpt(&options, envelope);
         }
+        send_data(&options, envelope);
     }
 
     ares_destroy(channel);

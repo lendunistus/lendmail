@@ -20,7 +20,7 @@ static void parse_ehlo_list(struct envelope *envelope, char *msg,
         } else if (strncmp(i, "SIZE", 4) == 0) {
             // Get to SIZE argument
             i += 5;
-            envelope->max_size = strtol(i, NULL, 10);
+            envelope->max_size = strtoul(i, NULL, 10);
         }
         // EHLO values that we don't know about are ignored
     }
@@ -61,16 +61,8 @@ static int recv_ehlo(struct envelope *envelope, char **buf, size_t *bufsize) {
         }
     }
 
-    // Size of message + null terminator
-    char *final_buf = realloc(*buf, bytes_got + 1);
-    if (!final_buf) {
-        printf("recv_ehlo: final alloc fail\n");
-        exit(-1);
-    }
     // We need the null terminator for parsing later
-    final_buf[bytes_got] = '\0';
-    *buf = final_buf;
-    *bufsize = bytes_got;
+    *(*buf + bytes_got) = '\0';
     return 0;
 }
 
@@ -179,6 +171,7 @@ int ehlo(const struct client_options *options, struct envelope *envelope) {
     }
     recv_ehlo(envelope, &envelope->buf, &envelope->buflen);
     parse_ehlo_list(envelope, envelope->buf, envelope->buflen);
+    memset(envelope->buf, 0, envelope->buflen);
 
     return 0;
 }
@@ -214,4 +207,27 @@ int send_data(const struct client_options *options, struct envelope *envelope) {
         printf("send_data: send failed");
         exit(1);
     }
+
+    recvall(envelope, envelope->buf, envelope->buflen);
+    char code[4] = {0};
+    memcpy(code, envelope->buf, 3);
+    if (strcmp(code, "250")) {
+        printf("wrong response code: %s", code);
+        exit(1);
+    }
+
+    size_t bytes_got = 0;
+    while ((bytes_got = fread(envelope->buf, 1, 1024, options->message)) != 0) {
+        sendall(envelope, envelope->buf, &bytes_got);
+    }
+
+    size_t msg_len = 5;
+    sendall(envelope, "\r\n.\r\n", &msg_len);
+
+    msg_len = recvall(envelope, envelope->buf, envelope->buflen);
+
+    msg_len = recvall(envelope, envelope->buf, envelope->buflen);
+    envelope->buf[msglen] = '\0';
+    printf("%s", envelope->buf);
+    return 0;
 }
