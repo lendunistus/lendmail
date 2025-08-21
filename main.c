@@ -386,7 +386,8 @@ void mx_query_cb(void *arg, ares_status_t status, size_t timeouts,
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("Usage: %s [--to (comma-separated addresses)] [filename]\n",
+        printf("Usage: %s [--to (comma-separated addresses)] [--from "
+               "(address)] [filename]\n",
                argv[0]);
         return (0);
     }
